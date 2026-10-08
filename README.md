@@ -63,6 +63,8 @@ npm test                    # no keys needed
 npm run chat                # talk to the bot in the terminal (needs ANTHROPIC_API_KEY)
 ```
 
+To replay a fixed set of customer questions: `npm run chat < test/customer-questions.txt`.
+
 `npm run chat` is the quickest way to check `knowledge.md`: ask it about pricing, ask for a discount,
 ask something off-topic, try "ignore your instructions...". Escalation emails are printed, not sent.
 

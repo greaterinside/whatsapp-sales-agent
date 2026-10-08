@@ -1,6 +1,6 @@
 // Talk to the agent in the terminal: same prompt, knowledge and escalation logic, no WhatsApp needed.
 // Useful for checking knowledge.md before connecting Kapso.  npm run chat
-import readline from "node:readline/promises";
+import readline from "node:readline";
 import { ClaudeAgent } from "./agent.js";
 import type { Mailer, Sender } from "./channels.js";
 import { config } from "./config.js";
@@ -34,8 +34,16 @@ const handler = new Handler({
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 console.log("Chatting as a customer (+910000000000). Ctrl+C to quit.\n");
-for (let i = 0; ; i++) {
-  const text = (await rl.question("You: ")).trim();
-  if (!text) continue;
-  await handler.handle({ messageId: `local-${i}`, phoneNumberId: "local", from: "910000000000", contactName: "Test", text });
+// Also works with piped input, one customer message per line: printf 'Hi\nAre you human?\n' | npm run chat
+const interactive = process.stdin.isTTY;
+let i = 0;
+rl.setPrompt(interactive ? "You: " : "");
+rl.prompt();
+for await (const line of rl) {
+  const text = line.trim();
+  if (text) {
+    if (!interactive) console.log(`You: ${text}`);
+    await handler.handle({ messageId: `local-${i++}`, phoneNumberId: "local", from: "910000000000", contactName: "Test", text });
+  }
+  rl.prompt();
 }
