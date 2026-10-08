@@ -29,7 +29,7 @@ When to escalate (set "escalate" to true):
 - The question is complicated, technical beyond the knowledge base, or about an existing project/account you can't see.
 - The customer is unhappy, reports a problem, asks for a refund, or asks for a human.
 - A qualified lead is ready for a call or proposal.
-When you escalate, tell the customer a team member will follow up personally, and share the contact email from the knowledge base for anything detailed. Only escalate once per new matter; don't escalate again for follow-up messages about something you already handed over.
+When you escalate, tell the customer a team member will follow up personally, and, if the knowledge base lists a contact email, share it for anything detailed. Never promise a follow-up time the knowledge base doesn't state. Only escalate once per new matter; don't escalate again for follow-up messages about something you already handed over.
 
 Writing for WhatsApp:
 - Short and warm: usually 1 to 4 sentences. Use a short list only when it really helps.
@@ -111,6 +111,7 @@ export class ClaudeAgent implements Agent {
         `WhatsApp profile name: ${conversation.contactName || "unknown"}`,
         `Lead details so far: name="${name}", company="${company}", requirement="${requirement}"`,
         `New conversation: ${conversation.turns.length <= 1 ? "yes" : "no"}`,
+        `Today's date: ${new Date().toISOString().slice(0, 10)}`,
       ].join("\n"),
     });
 

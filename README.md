@@ -119,7 +119,14 @@ Requests ask the API to retry a refused request on Anthropic's recommended fallb
 
 ## Before showing Ajit sir
 
-- [ ] Fill in every TODO in `knowledge.md` (services, pricing policy, contact email, hours, FAQs).
+- [ ] Resolve the TODOs in `knowledge.md`. Until then the bot avoids each topic and says the team will confirm:
+  - Customer support email, team hours and time zone, and the follow-up time after an escalation.
+  - Scale to a Million: enrollment status. The site shows "Sold Out", "Enrollment Open Now" and "Get on the waitlist" in different places.
+  - Scale to a Million: cohort cap. The site says both 40 and 100 founders.
+  - Scale to a Million: crossed-out original price. The site shows both $1,000 and $3,000. The bot is told never to mention original prices.
+  - Founders Membership: spots left (the site says only 10), whether it's open or waitlist-only, and its refund policy (not on the site).
+  - Founders annual plan "Save $600" is consistent (12 x $300 = $3,600 vs $3,000); no action needed.
+- [ ] Review the Founders intensive dates in `knowledge.md` each cycle (the bot is given today's date and works out which is current or next).
 - [ ] Check costs: Kapso plan, Meta per-message pricing (inbound replies inside 24 hours are not template messages),
       Claude API usage. Not verified yet.
 - [ ] Try the edge cases in `npm run chat`: discount requests, custom quotes, "are you a human?", off-topic,
