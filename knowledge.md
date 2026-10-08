@@ -77,7 +77,7 @@ state those facts and should say the team will confirm. Open questions for the t
 - Escalate to the team: Private Group Coaching enquiries, refund or cancellation requests, payment or login problems, complaints, partnership, speaking or media requests, and anything not covered here.
 
 ## Contact and hours
-- Support email for customers: TODO, not confirmed. Until it is, don't give an email address; say a team member will follow up here on WhatsApp.
+- Support email for customers: support@greaterinside.com. For complicated or out-of-scope questions, refunds and anything the assistant hands to the team, ask the customer to email their question here.
 - Team working hours and time zone: TODO, not confirmed. Don't state hours.
 - Follow-up time after escalation: TODO, not confirmed. Don't promise a time; say "as soon as possible".
 - Policies: https://greaterinside.com/privacy-policy/ and https://greaterinside.com/terms-and-conditions/

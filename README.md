@@ -28,8 +28,8 @@ Claude API  (system prompt + knowledge.md + this customer's history)
 - Politely declines off-topic requests. Customer messages are treated as untrusted input
   (instructions inside them are ignored).
 - Keeps history per phone number and picks up name / company / requirement naturally.
-- Escalation: tells the customer a team member will follow up (and gives the contact email from
-  `knowledge.md`), then emails the team. If Claude or the WhatsApp send fails, the customer gets a safe
+- Escalation: asks the customer to email their question to the support address in `knowledge.md`
+  (support@greaterinside.com), and also emails the team as a backup. If Claude or the WhatsApp send fails, the customer gets a safe
   holding reply where possible and the team is emailed anyway.
 - Human takeover: pause the bot for one number, reply yourself, then resume. While paused, messages
   are still saved so the bot has the full context when it takes over again.
@@ -122,7 +122,7 @@ Requests ask the API to retry a refused request on Anthropic's recommended fallb
 ## Before showing Ajit sir
 
 - [ ] Resolve the TODOs in `knowledge.md`. Until then the bot avoids each topic and says the team will confirm:
-  - Customer support email, team hours and time zone, and the follow-up time after an escalation.
+  - Team hours and time zone, and the follow-up time after an escalation. (Support email: support@greaterinside.com, done.)
   - Scale to a Million: enrollment status. The site shows "Sold Out", "Enrollment Open Now" and "Get on the waitlist" in different places.
   - Scale to a Million: cohort cap. The site says both 40 and 100 founders.
   - Scale to a Million: crossed-out original price. The site shows both $1,000 and $3,000. The bot is told never to mention original prices.
