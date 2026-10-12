@@ -106,11 +106,14 @@ create or replace function wa_release_lock(p_phone text, p_token text) returns v
   delete from wa_locks where phone = p_phone and token = p_token
 $$;
 
--- Only the server (service role) may call these; not the public anon key.
+-- Only the server (service role) may use these; not the public anon key. Granted explicitly so it works
+-- even when the project has "Automatically expose new tables" turned off.
 do $$
 declare f text;
 begin
   if exists (select from pg_roles where rolname = 'service_role') then
+    revoke all on wa_conversations, wa_processed_messages, wa_locks from anon, authenticated;
+    grant select, insert, update, delete on wa_conversations, wa_processed_messages, wa_locks to service_role;
     foreach f in array array[
       'wa_get_conversation(text)', 'wa_save_conversation(jsonb)', 'wa_list_conversations()',
       'wa_set_paused(text, boolean)', 'wa_paused_phones()', 'wa_mark_processed(text)',
