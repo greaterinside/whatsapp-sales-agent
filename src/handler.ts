@@ -39,36 +39,32 @@ export function parseKapsoWebhook(body: unknown): InboundMessage[] {
 }
 
 export class Handler {
-  private queues = new Map<string, Promise<void>>();
-
   constructor(
     private deps: { store: Store; agent: Agent; sender: Sender; mailer: Mailer; adminPhones: string[] },
   ) {}
 
-  /** Messages from one number are handled strictly in order; different numbers run in parallel. */
-  handle(msg: InboundMessage): Promise<void> {
-    const prev = this.queues.get(msg.from) ?? Promise.resolve();
-    const next = prev.then(() => this.process(msg)).catch((err) => console.error(`[handler] ${msg.from}:`, err));
-    this.queues.set(msg.from, next);
-    void next.finally(() => {
-      if (this.queues.get(msg.from) === next) this.queues.delete(msg.from);
-    });
-    return next;
+  /** Messages from one number are handled strictly in order (store lock); different numbers run in parallel. */
+  async handle(msg: InboundMessage): Promise<void> {
+    try {
+      if (!(await this.deps.store.markProcessed(msg.messageId))) return; // webhook retry
+      await this.deps.store.withLock(msg.from, () => this.process(msg));
+    } catch (err) {
+      console.error(`[handler] ${msg.from}:`, err);
+    }
   }
 
   private async process(msg: InboundMessage): Promise<void> {
     const { store, sender } = this.deps;
-    if (!store.markProcessed(msg.messageId)) return; // webhook retry
 
     if (this.deps.adminPhones.includes(msg.from) && msg.text.startsWith("/")) {
-      await sender.sendText(msg.phoneNumberId, msg.from, this.adminCommand(msg.text));
+      await sender.sendText(msg.phoneNumberId, msg.from, await this.adminCommand(msg.text));
       return;
     }
 
-    const convo = store.conversation(msg.from);
+    const convo = await store.getConversation(msg.from);
     if (msg.contactName) convo.contactName = msg.contactName;
     convo.turns.push({ role: "user", text: msg.text, at: new Date().toISOString() });
-    store.save();
+    await store.saveConversation(convo);
 
     if (convo.paused) {
       console.log(`[handler] ${msg.from} is paused (human handling); not replying`);
@@ -93,11 +89,11 @@ export class Handler {
     }
 
     // Re-check: someone may have paused this number while Claude was thinking.
-    if (convo.paused) return;
+    if (await store.isPaused(msg.from)) return;
 
     convo.lead = mergeLead(convo.lead, decision.lead);
     convo.turns.push({ role: "assistant", text: decision.reply, at: new Date().toISOString() });
-    store.save();
+    await store.saveConversation(convo);
     try {
       await sender.sendText(msg.phoneNumberId, msg.from, decision.reply);
     } catch (err) {
@@ -110,27 +106,27 @@ export class Handler {
 
     if (decision.escalate) {
       convo.lastEscalatedAt = new Date().toISOString();
-      store.save();
+      await store.saveConversation(convo);
       await this.deps.mailer
         .send(escalationSubject(convo, decision), escalationBody(convo, decision))
         .catch((err) => console.error(`[handler] escalation email failed for ${msg.from}:`, err));
     }
   }
 
-  private adminCommand(text: string): string {
+  private async adminCommand(text: string): Promise<string> {
     const [cmd, ...rest] = text.trim().split(/\s+/);
     const phone = normalizePhone(rest.join("")); // "+91 98765 43210" is one number
     switch (cmd.toLowerCase()) {
       case "/pause":
         if (!phone) return "Usage: /pause <number with country code>";
-        this.setPaused(phone, true);
+        await this.setPaused(phone, true);
         return `Paused the bot for +${phone}. You can reply to them yourself now. Send /resume ${phone} to hand back.`;
       case "/resume":
         if (!phone) return "Usage: /resume <number with country code>";
-        this.setPaused(phone, false);
+        await this.setPaused(phone, false);
         return `Bot is answering +${phone} again.`;
       case "/status": {
-        const paused = this.deps.store.all().filter((c) => c.paused);
+        const paused = await Promise.all((await this.deps.store.pausedPhones()).map((p) => this.deps.store.getConversation(p)));
         return paused.length
           ? `Paused numbers:\n${paused.map((c) => `+${c.phone}${c.contactName ? ` (${c.contactName})` : ""}`).join("\n")}`
           : "The bot is answering everyone. No numbers paused.";
@@ -140,12 +136,8 @@ export class Handler {
     }
   }
 
-  setPaused(phone: string, paused: boolean): Conversation {
-    const convo = this.deps.store.conversation(normalizePhone(phone));
-    convo.paused = paused;
-    convo.pausedAt = paused ? new Date().toISOString() : undefined;
-    this.deps.store.save();
-    return convo;
+  setPaused(phone: string, paused: boolean): Promise<Conversation> {
+    return this.deps.store.setPaused(normalizePhone(phone), paused);
   }
 }
 

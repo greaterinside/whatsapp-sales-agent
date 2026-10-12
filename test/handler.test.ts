@@ -6,8 +6,9 @@ import type { Agent, AgentDecision } from "../src/agent.js";
 import type { Mailer, Sender } from "../src/channels.js";
 import { config } from "../src/config.js";
 import { Handler, parseKapsoWebhook, type InboundMessage } from "../src/handler.js";
-import { createApp, verifyKapsoSignature } from "../src/server.js";
-import { Store, type Conversation } from "../src/store.js";
+import { route, verifyKapsoSignature, type App } from "../src/http.js";
+import { createServer } from "../src/server.js";
+import { FileStore, type Conversation } from "../src/store.js";
 
 function decision(over: Partial<AgentDecision> = {}): AgentDecision {
   return {
@@ -36,7 +37,7 @@ function setup(decide: (c: Conversation) => Promise<AgentDecision> = async () =>
     markRead: async () => {},
   };
   const mailer: Mailer = { send: async (subject, body) => void emails.push({ subject, body }) };
-  const store = new Store(null);
+  const store = new FileStore(null);
   const handler = new Handler({ store, agent, sender, mailer, adminPhones: ["919999999999"] });
   return { handler, store, sent, emails, agentCalls };
 }
@@ -60,7 +61,7 @@ test("replies via Claude and keeps per-number history", async () => {
     agentCalls[1].turns.map((t) => t.role),
     ["user", "assistant", "user"],
   );
-  assert.equal(store.conversation("919876543210").contactName, "Ravi");
+  assert.equal((await store.getConversation("919876543210")).contactName, "Ravi");
 });
 
 test("ignores webhook retries of the same message id", async () => {
@@ -89,7 +90,7 @@ test("escalation sends an email with number, lead details and summary", async ()
   assert.match(emails[0].body, /\+919876543210/);
   assert.match(emails[0].body, /Acme/);
   assert.match(emails[0].body, /custom quote/);
-  assert.deepEqual(store.conversation("919876543210").lead, { name: "Ravi", company: "Acme", requirement: "SEO retainer" });
+  assert.deepEqual((await store.getConversation("919876543210")).lead, { name: "Ravi", company: "Acme", requirement: "SEO retainer" });
 });
 
 test("lead details are not wiped by a later empty value", async () => {
@@ -101,7 +102,7 @@ test("lead details are not wiped by a later empty value", async () => {
   });
   await handler.handle(msg("I'm Ravi from Acme"));
   await handler.handle(msg("thanks"));
-  assert.equal(store.conversation("919876543210").lead.company, "Acme");
+  assert.equal((await store.getConversation("919876543210")).lead.company, "Acme");
 });
 
 test("Claude failure: customer gets a safe reply and the team is emailed", async () => {
@@ -133,7 +134,7 @@ test("paused numbers are recorded but not answered; admin commands pause and res
   await handler.handle(msg("Are you there?"));
   assert.equal(agentCalls.length, 0);
   assert.equal(sent.length, 1);
-  assert.equal(store.conversation("919876543210").turns.length, 1);
+  assert.equal((await store.getConversation("919876543210")).turns.length, 1);
 
   await handler.handle(msg("/status", "919999999999"));
   assert.match(sent.at(-1)!.body, /919876543210/);
@@ -179,31 +180,60 @@ test("parseKapsoWebhook handles single, batched, outbound and media payloads", (
   assert.match(media[0].text, /image message/);
 });
 
-test("webhook endpoint checks the Kapso signature and acknowledges immediately", async () => {
+const webhookBody = JSON.stringify({
+  message: { id: "wamid.sig", type: "text", text: { body: "Hi" }, kapso: { direction: "inbound" } },
+  conversation: { phone_number: "+15551234567", phone_number_id: "pnid" },
+  phone_number_id: "pnid",
+});
+
+test("webhook route checks the Kapso signature, acknowledges, and hands the work to waitUntil", async () => {
   const { handler, store, sent } = setup();
   const secret = "s3cret";
-  const app = createApp(handler, store, { ...config, kapsoWebhookSecret: secret });
-  const server = app.listen(0);
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/webhooks/kapso`;
-  const body = JSON.stringify({
-    message: { id: "wamid.sig", type: "text", text: { body: "Hi" }, kapso: { direction: "inbound" } },
-    conversation: { phone_number: "+15551234567", phone_number_id: "pnid" },
-    phone_number_id: "pnid",
-  });
-  const sig = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  const background: Promise<unknown>[] = [];
+  const app: App = { handler, store, cfg: { ...config, kapsoWebhookSecret: secret }, waitUntil: (p) => void background.push(p) };
+  const sig = crypto.createHmac("sha256", secret).update(webhookBody).digest("hex");
+  const post = (headers: Record<string, string>, url = "https://bot.example/webhooks/kapso") =>
+    route(new Request(url, { method: "POST", body: webhookBody, headers }), app);
+
+  assert.equal((await post({ "x-webhook-signature": "nope" })).status, 401);
+  assert.equal(background.length, 0);
+
+  // Vercel delivers every path as /api?path=<original path>.
+  const ok = await post(
+    { "x-webhook-signature": sig, "x-webhook-event": "whatsapp.message.received" },
+    "https://bot.example/api?path=webhooks/kapso",
+  );
+  assert.equal(ok.status, 200);
+  assert.equal(background.length, 1);
+  await Promise.all(background);
+  assert.equal(sent[0]?.to, "15551234567");
+  assert.equal(verifyKapsoSignature(secret, Buffer.from(webhookBody), sig.toUpperCase()), true);
+});
+
+test("admin routes need the token and pause/resume a number", async () => {
+  const { handler, store } = setup();
+  const app: App = { handler, store, cfg: { ...config, adminToken: "t0k" }, waitUntil: () => {} };
+  const call = (method: string, path: string, token = "t0k") =>
+    route(new Request(`https://bot.example${path}`, { method, headers: { authorization: `Bearer ${token}` } }), app);
+  assert.equal((await call("POST", "/admin/pause/919876543210", "wrong")).status, 401);
+  assert.equal(((await (await call("POST", "/admin/pause/+91%2098765%2043210")).json()) as Conversation).paused, true);
+  assert.equal(await store.isPaused("919876543210"), true);
+  await call("POST", "/admin/resume/919876543210");
+  assert.equal(await store.isPaused("919876543210"), false);
+  assert.equal((await call("GET", "/admin/nope")).status, 404);
+});
+
+test("local server serves the same routes over node:http", async () => {
+  const { handler, store, sent } = setup();
+  const app: App = { handler, store, cfg: { ...config, kapsoWebhookSecret: "" }, waitUntil: () => {} };
+  const server = createServer(app).listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const bad = await fetch(url, { method: "POST", body, headers: { "x-webhook-signature": "nope" } });
-    assert.equal(bad.status, 401);
-    const ok = await fetch(url, {
-      method: "POST",
-      body,
-      headers: { "content-type": "application/json", "x-webhook-signature": sig, "x-webhook-event": "whatsapp.message.received" },
-    });
-    assert.equal(ok.status, 200);
+    assert.equal((await fetch(`${base}/health`)).status, 200);
+    assert.equal((await fetch(`${base}/webhooks/kapso`, { method: "POST", body: webhookBody })).status, 200);
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(sent[0]?.to, "15551234567");
   } finally {
     server.close();
   }
-  assert.equal(verifyKapsoSignature(secret, Buffer.from(body), sig.toUpperCase()), true);
 });

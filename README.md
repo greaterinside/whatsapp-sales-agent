@@ -45,9 +45,11 @@ Not in v1: calendar booking, reminders, outbound/broadcast messages, WhatsApp Fl
 | `knowledge.md` | **Everything the bot is allowed to say.** Fill in every TODO before sharing the number. |
 | `src/agent.ts` | System prompt and the Claude call (structured JSON output, prompt caching, refusal fallback) |
 | `src/handler.ts` | Message flow: dedupe, admin commands, pause, Claude, reply, escalation email |
-| `src/server.ts` | Express app: Kapso webhook (signature check) and `/admin` endpoints |
+| `src/http.ts` | Routes (`/webhooks/kapso` with signature check, `/admin/...`, `/health`), shared by Vercel and the local server |
+| `api/index.ts`, `vercel.json` | Vercel entry point: every path goes to one function |
+| `src/server.ts` | Local server for `npm run dev` |
 | `src/channels.ts` | Kapso sender and SMTP mailer |
-| `src/store.ts` | JSON-file storage in `DATA_DIR` (history, leads, paused numbers) |
+| `src/store.ts` | History, leads, paused numbers: Upstash Redis on Vercel, a JSON file in `DATA_DIR` locally |
 | `src/chat.ts` | Terminal chat with the bot, no WhatsApp needed |
 | `test/` | Tests with fake Claude / Kapso / email (`npm test`, no keys needed) |
 
@@ -99,15 +101,23 @@ since the number isn't on the WhatsApp app):
 
 Every escalation email repeats the `/pause` command for that number.
 
-## Deploy (Railway)
+## Deploy (Vercel)
 
-1. New service from this repo, root directory `whatsapp-agent`. Build: `npm install`; start: `npm start`.
-2. Add the variables from `.env.example`.
-3. Attach a volume and set `DATA_DIR` to its mount path (e.g. `/data`), otherwise history is lost on each deploy.
-4. Point the Kapso webhook at `https://<service>.up.railway.app/webhooks/kapso`.
+1. In Vercel, **Add New → Project** and import this repo. Framework preset: **Other**. Leave the build and
+   output settings empty; `vercel.json` sets up the function.
+2. **Storage** tab → create or connect an **Upstash Redis** database (free tier is plenty) and connect it to
+   the project. It adds the `KV_REST_API_URL` / `KV_REST_API_TOKEN` variables the bot reads. Vercel's disk isn't
+   kept between requests, so the bot refuses to start on Vercel without Redis.
+3. **Settings → Environment Variables**: add the variables from `.env.example` (`ANTHROPIC_API_KEY`,
+   `CLAUDE_MODEL`, `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `ESCALATION_EMAIL`, SMTP, `ADMIN_PHONES`,
+   `ADMIN_TOKEN`). Leave out `PORT` and `DATA_DIR`.
+4. Deploy, then check `https://<project>.vercel.app/health` returns `{"ok":true}`.
+5. Point the Kapso webhook at `https://<project>.vercel.app/webhooks/kapso` (the production domain: Vercel's
+   deployment protection can block Kapso on preview URLs).
 
-Vercel isn't a good fit: the webhook replies to Kapso straight away and keeps working in the background,
-and it keeps state on disk; serverless functions do neither.
+How it runs there: the webhook answers Kapso straight away and finishes the Claude call and the reply with
+`waitUntil` (up to 300 seconds, set in `vercel.json`). Each customer's messages are handled one at a time using
+a short Redis lock, so replies don't cross even when messages land on different instances.
 
 ## Settings
 
@@ -139,4 +149,4 @@ Requests ask the API to retry a refused request on Anthropic's recommended fallb
 
 - Meta's 24-hour rule: free-form replies only within 24 hours of the customer's last message. v1 only ever
   replies to inbound messages, so this is fine. Outbound messages later will need approved templates.
-- Storage is a JSON file: fine for one instance and a demo. Move to Postgres before running several instances.
+- Storage: Upstash Redis on Vercel; locally (no Redis variables) a JSON file in `DATA_DIR`.

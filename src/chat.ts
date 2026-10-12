@@ -5,7 +5,7 @@ import { ClaudeAgent } from "./agent.js";
 import type { Mailer, Sender } from "./channels.js";
 import { config } from "./config.js";
 import { Handler } from "./handler.js";
-import { Store } from "./store.js";
+import { FileStore } from "./store.js";
 
 const consoleSender: Sender = {
   async sendText(_id, _to, body) {
@@ -20,7 +20,7 @@ const consoleMailer: Mailer = {
 };
 
 const handler = new Handler({
-  store: new Store(null),
+  store: new FileStore(null),
   agent: new ClaudeAgent({
     model: config.claudeModel,
     effort: config.claudeEffort,
