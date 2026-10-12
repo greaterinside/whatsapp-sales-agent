@@ -17,12 +17,13 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",
     "@kapso/whatsapp-cloud-api": "^0.3.0",
-    "@upstash/redis": "^1.39.0",
+    "@supabase/supabase-js": "^2.117.3",
     "@vercel/functions": "^3.9.11",
     "nodemailer": "^10.0.16",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^26.6.4",
     "@types/nodemailer": "^8.0.2",
     "typescript": "^7.0.2"

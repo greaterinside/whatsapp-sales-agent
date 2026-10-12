@@ -4,7 +4,7 @@ import { ClaudeAgent } from "./agent.js";
 import { KapsoSender, SmtpMailer } from "./channels.js";
 import { config, normalizePhone, type Config } from "./config.js";
 import { Handler, parseKapsoWebhook } from "./handler.js";
-import { FileStore, RedisStore, type Conversation, type Store } from "./store.js";
+import { FileStore, SupabaseStore, type Conversation, type Store } from "./store.js";
 
 export interface App {
   handler: Handler;
@@ -14,13 +14,13 @@ export interface App {
   waitUntil: (work: Promise<unknown>) => void;
 }
 
-/** Redis when it is configured (Vercel), otherwise the JSON file in DATA_DIR. */
+/** Supabase when it is configured (Vercel), otherwise the JSON file in DATA_DIR. */
 export function buildApp(waitUntil: App["waitUntil"], cfg = config): App {
-  const redisConfigured = Boolean(process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL);
-  if (process.env.VERCEL && !redisConfigured) {
-    throw new Error("On Vercel, connect an Upstash Redis store to the project (Storage tab); the disk is not kept between requests");
+  const supabaseConfigured = Boolean(process.env.SUPABASE_URL);
+  if (process.env.VERCEL && !supabaseConfigured) {
+    throw new Error("On Vercel, set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY; the disk is not kept between requests");
   }
-  const store = redisConfigured ? RedisStore.fromEnv() : new FileStore(cfg.dataDir);
+  const store = supabaseConfigured ? SupabaseStore.fromEnv() : new FileStore(cfg.dataDir);
   const handler = new Handler({
     store,
     agent: new ClaudeAgent({

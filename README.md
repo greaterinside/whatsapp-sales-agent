@@ -49,7 +49,8 @@ Not in v1: calendar booking, reminders, outbound/broadcast messages, WhatsApp Fl
 | `api/index.ts`, `vercel.json` | Vercel entry point: every path goes to one function |
 | `src/server.ts` | Local server for `npm run dev` |
 | `src/channels.ts` | Kapso sender and SMTP mailer |
-| `src/store.ts` | History, leads, paused numbers: Upstash Redis on Vercel, a JSON file in `DATA_DIR` locally |
+| `src/store.ts` | History, leads, paused numbers: Supabase on Vercel, a JSON file in `DATA_DIR` locally |
+| `supabase/schema.sql` | Tables and functions to run once in Supabase (all prefixed `wa_`) |
 | `src/chat.ts` | Terminal chat with the bot, no WhatsApp needed |
 | `test/` | Tests with fake Claude / Kapso / email (`npm test`, no keys needed) |
 
@@ -105,9 +106,11 @@ Every escalation email repeats the `/pause` command for that number.
 
 1. In Vercel, **Add New → Project** and import this repo. Framework preset: **Other**. Leave the build and
    output settings empty; `vercel.json` sets up the function.
-2. **Storage** tab → create or connect an **Upstash Redis** database (free tier is plenty) and connect it to
-   the project. It adds the `KV_REST_API_URL` / `KV_REST_API_TOKEN` variables the bot reads. Vercel's disk isn't
-   kept between requests, so the bot refuses to start on Vercel without Redis.
+2. **Supabase**: in your Supabase project, open **SQL Editor**, paste `supabase/schema.sql` and **Run**. It creates
+   `wa_` tables and functions only (safe to re-run, and safe in a project other apps use). Then copy the project URL
+   and the **service role** key from Project Settings → API into Vercel as `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY`. Vercel's disk isn't kept between requests, so the bot refuses to start there
+   without Supabase. Conversations and leads are then visible in Supabase's Table Editor (`wa_conversations`).
 3. **Settings → Environment Variables**: add the variables from `.env.example` (`ANTHROPIC_API_KEY`,
    `CLAUDE_MODEL`, `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `ESCALATION_EMAIL`, SMTP, `ADMIN_PHONES`,
    `ADMIN_TOKEN`). Leave out `PORT` and `DATA_DIR`.
@@ -117,7 +120,7 @@ Every escalation email repeats the `/pause` command for that number.
 
 How it runs there: the webhook answers Kapso straight away and finishes the Claude call and the reply with
 `waitUntil` (up to 300 seconds, set in `vercel.json`). Each customer's messages are handled one at a time using
-a short Redis lock, so replies don't cross even when messages land on different instances.
+a short lock in Supabase, so replies don't cross even when messages land on different instances.
 
 ## Settings
 
@@ -149,4 +152,5 @@ Requests ask the API to retry a refused request on Anthropic's recommended fallb
 
 - Meta's 24-hour rule: free-form replies only within 24 hours of the customer's last message. v1 only ever
   replies to inbound messages, so this is fine. Outbound messages later will need approved templates.
-- Storage: Upstash Redis on Vercel; locally (no Redis variables) a JSON file in `DATA_DIR`.
+- Storage: Supabase on Vercel; locally (no `SUPABASE_URL`) a JSON file in `DATA_DIR`.
+- The service role key bypasses Supabase's row security: keep it only in Vercel's environment variables, never in the browser or the repo.

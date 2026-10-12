@@ -1,9 +1,9 @@
 // Conversation history, paused numbers, leads and processed message ids.
-// FileStore: one JSON file, for local runs and tests. RedisStore: Upstash Redis, for Vercel,
+// FileStore: one JSON file, for local runs and tests. SupabaseStore: Postgres tables, for Vercel,
 // where the disk is temporary and every request can land on a different instance.
 import fs from "node:fs";
 import path from "node:path";
-import { Redis } from "@upstash/redis";
+import { createClient } from "@supabase/supabase-js";
 
 export interface Turn {
   role: "user" | "assistant";
@@ -134,79 +134,69 @@ export class FileStore implements Store {
   }
 }
 
-// ---- Redis (Vercel) ---------------------------------------------------------------------
+// ---- Supabase (Vercel) ------------------------------------------------------------------
 
-/** The few Redis commands we use; satisfied by @upstash/redis and by the fake in tests. */
-export interface RedisLike {
-  get<T>(key: string): Promise<T | null>;
-  set(key: string, value: unknown, opts?: { nx?: true; px?: number; ex?: number }): Promise<unknown>;
-  del(key: string): Promise<unknown>;
-  sadd(key: string, member: string): Promise<unknown>;
-  srem(key: string, member: string): Promise<unknown>;
-  smembers(key: string): Promise<string[]>;
-  sismember(key: string, member: string): Promise<number>;
+/** The one supabase-js call we use; all logic lives in the SQL functions in supabase/schema.sql. */
+export interface RpcClient {
+  rpc(fn: string, args?: Record<string, unknown>): PromiseLike<{ data: unknown; error: { message: string } | null }>;
 }
 
 const LOCK_TTL_MS = 120_000; // longer than one Claude call + reply
 const LOCK_WAIT_MS = 90_000;
-const PROCESSED_TTL_S = 7 * 24 * 3600;
 
-export class RedisStore implements Store {
+export class SupabaseStore implements Store {
   constructor(
-    private redis: RedisLike,
+    private db: RpcClient,
     private sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)),
   ) {}
 
-  /** Uses UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN (what Vercel's Upstash integration sets). */
-  static fromEnv(): RedisStore {
-    const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-    if (!url || !token) throw new Error("Redis is not configured: set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN");
-    return new RedisStore(new Redis({ url, token }) as unknown as RedisLike);
+  /** Reads SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (what Vercel's Supabase integration sets). */
+  static fromEnv(): SupabaseStore {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
+    if (!url || !key) throw new Error("Supabase is not configured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+    return new SupabaseStore(createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }));
   }
 
-  async getConversation(phone: string): Promise<Conversation> {
-    const [c, paused] = await Promise.all([this.redis.get<Conversation>(`convo:${phone}`), this.isPaused(phone)]);
-    return { ...(c ?? newConversation(phone)), paused };
+  private async call<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
+    const { data, error } = await this.db.rpc(fn, args);
+    if (error) throw new Error(`Supabase ${fn}: ${error.message}`);
+    return data as T;
   }
 
-  async saveConversation(c: Conversation) {
-    const { paused: _paused, pausedAt: _pausedAt, ...rest } = c;
-    await this.redis.set(`convo:${c.phone}`, rest);
-    await this.redis.sadd("convos", c.phone);
+  getConversation(phone: string) {
+    return this.call<Conversation>("wa_get_conversation", { p_phone: phone });
   }
 
-  async listConversations() {
-    const phones = await this.redis.smembers("convos");
-    return Promise.all(phones.map((p) => this.getConversation(p)));
+  saveConversation(c: Conversation) {
+    return this.call<void>("wa_save_conversation", { p: c });
+  }
+
+  listConversations() {
+    return this.call<Conversation[]>("wa_list_conversations");
   }
 
   async isPaused(phone: string) {
-    return (await this.redis.sismember("paused", phone)) === 1;
+    return (await this.getConversation(phone)).paused;
   }
 
-  async setPaused(phone: string, paused: boolean) {
-    // Separate from the conversation document, so a reply being saved can't undo a pause.
-    if (paused) await this.redis.sadd("paused", phone);
-    else await this.redis.srem("paused", phone);
-    const c = await this.getConversation(phone);
-    return { ...c, pausedAt: paused ? new Date().toISOString() : undefined };
+  setPaused(phone: string, paused: boolean) {
+    return this.call<Conversation>("wa_set_paused", { p_phone: phone, p_paused: paused });
   }
 
   pausedPhones() {
-    return this.redis.smembers("paused");
+    return this.call<string[]>("wa_paused_phones");
   }
 
-  async markProcessed(messageId: string) {
-    return (await this.redis.set(`msg:${messageId}`, 1, { nx: true, ex: PROCESSED_TTL_S })) === "OK";
+  markProcessed(messageId: string) {
+    return this.call<boolean>("wa_mark_processed", { p_id: messageId });
   }
 
   async withLock<T>(phone: string, fn: () => Promise<T>): Promise<T> {
-    const key = `lock:${phone}`;
     const token = crypto.randomUUID();
     const deadline = Date.now() + LOCK_WAIT_MS;
     let held = false;
-    while (!(held = (await this.redis.set(key, token, { nx: true, px: LOCK_TTL_MS })) === "OK")) {
+    while (!(held = await this.call<boolean>("wa_acquire_lock", { p_phone: phone, p_token: token, p_ttl_ms: LOCK_TTL_MS }))) {
       if (Date.now() > deadline) {
         console.warn(`[store] lock for ${phone} not released after ${LOCK_WAIT_MS}ms; continuing without it`);
         break;
@@ -216,7 +206,7 @@ export class RedisStore implements Store {
     try {
       return await fn();
     } finally {
-      if (held && (await this.redis.get<string>(key)) === token) await this.redis.del(key);
+      if (held) await this.call<void>("wa_release_lock", { p_phone: phone, p_token: token }).catch(() => {});
     }
   }
 }
