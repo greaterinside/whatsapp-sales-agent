@@ -47,7 +47,7 @@ Not in v1: calendar booking, reminders, outbound/broadcast messages, WhatsApp Fl
 | `src/handler.ts` | Message flow: dedupe, admin commands, pause, Claude, reply, escalation email |
 | `src/http.ts` | Routes (`/webhooks/kapso` with signature check, `/admin/...`, `/health`), shared by Vercel and the local server |
 | `api/index.ts`, `vercel.json` | Vercel entry point: every path goes to one function |
-| `src/server.ts` | Local server for `npm run dev` |
+| `src/local-server.ts` | Local server for `npm run dev` |
 | `src/channels.ts` | Kapso sender and SMTP mailer |
 | `src/store.ts` | History, leads, paused numbers: Supabase on Vercel, a JSON file in `DATA_DIR` locally |
 | `supabase/schema.sql` | Tables and functions to run once in Supabase (all prefixed `wa_`) |

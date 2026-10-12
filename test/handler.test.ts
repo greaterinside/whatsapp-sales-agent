@@ -7,7 +7,7 @@ import type { Mailer, Sender } from "../src/channels.js";
 import { config } from "../src/config.js";
 import { Handler, parseKapsoWebhook, type InboundMessage } from "../src/handler.js";
 import { route, verifyKapsoSignature, type App } from "../src/http.js";
-import { createServer } from "../src/server.js";
+import { createServer } from "../src/local-server.js";
 import { FileStore, type Conversation } from "../src/store.js";
 
 function decision(over: Partial<AgentDecision> = {}): AgentDecision {

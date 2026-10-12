@@ -1,7 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [{ "source": "/(.*)", "destination": "/api?path=$1" }],
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api?path=$1"
+    }
+  ],
   "functions": {
-    "api/index.ts": { "maxDuration": 300, "includeFiles": "knowledge.md" }
+    "api/index.ts": {
+      "maxDuration": 300,
+      "includeFiles": "knowledge.md"
+    }
   }
 }
